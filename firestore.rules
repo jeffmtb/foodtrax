@@ -1,0 +1,71 @@
+rules_version = '2';
+
+// Shared household data model:
+// groceryListMembers/{uid}: console-managed membership, self-readable only.
+// groceryItems/{id}: name (1–80 chars), count (int 1–9), inCart (bool),
+//   optional createdAt (existing grocery schema).
+// recipes/{id}: title (1–100 chars), ingredientsText (1–100 newline-separated
+//   ingredients of 1–80 chars each), instructions (0–10000 chars),
+//   version (positive int, increments on update), createdAt (immutable timestamp),
+//   updatedAt (timestamp). All members share read/edit/delete permissions.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isGroceryListMember() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/groceryListMembers/$(request.auth.uid));
+    }
+
+    function validGroceryItem() {
+      return request.resource.data.keys().hasOnly(['name', 'count', 'inCart', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.count is int
+        && request.resource.data.count >= 1
+        && request.resource.data.count <= 9
+        && request.resource.data.inCart is bool;
+    }
+
+    function validRecipe() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['title', 'ingredientsText', 'instructions', 'version', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'ingredientsText', 'instructions', 'version', 'createdAt', 'updatedAt'])
+        && data.title is string
+        && data.title.size() > 0 && data.title.size() <= 100
+        && data.title.matches('[\\s\\S]*[^\\s][\\s\\S]*')
+        && data.ingredientsText is string
+        && data.ingredientsText.size() > 0 && data.ingredientsText.size() <= 8099
+        && data.ingredientsText.matches('[^\\r\\n]{1,80}(\\n[^\\r\\n]{1,80}){0,99}')
+        && data.instructions is string && data.instructions.size() <= 10000
+        && data.version is int && data.version >= 1
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+
+    // Members can check their own membership. Membership changes are managed
+    // by the project owner in the Firebase console.
+    match /groceryListMembers/{userId} {
+      allow get: if request.auth != null && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
+    }
+
+    match /groceryItems/{itemId} {
+      allow read, delete: if isGroceryListMember();
+      allow create, update: if isGroceryListMember() && validGroceryItem();
+    }
+
+    match /recipes/{recipeId} {
+      allow read, delete: if isGroceryListMember();
+      allow create: if isGroceryListMember() && validRecipe()
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.version == 1;
+      allow update: if isGroceryListMember() && validRecipe()
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.version == resource.data.version + 1;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

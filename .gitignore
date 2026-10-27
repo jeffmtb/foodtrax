@@ -1,0 +1,38 @@
+node_modules
+
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Firebase CLI caches and logs
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+database-debug.log*
+.runtimeconfig.json
+
+# Local credentials and private keys
+*.pem
+*.p12
+*.key
+serviceAccount*.json
+*-service-account*.json
+*-firebase-adminsdk-*.json
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*

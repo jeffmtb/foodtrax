@@ -1,0 +1,32 @@
+{
+	"id": "/",
+	"name": "Food Trax — Shared Grocery List",
+	"short_name": "Food Trax",
+	"description": "A simple shared grocery list for your household.",
+	"start_url": "/",
+	"scope": "/",
+	"display": "standalone",
+	"background_color": "#102018",
+	"theme_color": "#1d6a4b",
+	"categories": ["shopping", "lifestyle"],
+	"icons": [
+		{
+			"src": "/icons/food-trax-192.png",
+			"sizes": "192x192",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/icons/food-trax-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/icons/food-trax-maskable-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "maskable"
+		}
+	]
+}
