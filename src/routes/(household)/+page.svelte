@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
-		addDoc,
 		collection,
 		doc,
 		getDocs,
@@ -28,6 +27,16 @@
 	let errorMessage = $state('');
 	let recentlyDeleted = $state<GroceryItem | null>(null);
 	let undoingDelete = $state(false);
+	let draggedItemId = $state<string | null>(null);
+	let dragCandidate: {
+		itemId: string;
+		pointerId: number;
+		startX: number;
+		startY: number;
+		started: boolean;
+		changed: boolean;
+		timer?: ReturnType<typeof setTimeout>;
+	} | null = null;
 	let undoTimeout: ReturnType<typeof setTimeout> | undefined;
 
 	onMount(() => {
@@ -36,7 +45,19 @@
 			(snapshot) => {
 				items = snapshot.docs
 					.map((item) => ({ id: item.id, ...item.data() }) as GroceryItem)
-					.sort((a, b) => a.name.localeCompare(b.name));
+					.sort((a, b) => {
+						if (typeof a.sortOrder === 'number' && typeof b.sortOrder === 'number') {
+							const orderDifference = a.sortOrder - b.sortOrder;
+							if (orderDifference) return orderDifference;
+						}
+						if (!a.createdAt) return b.createdAt ? 1 : a.id.localeCompare(b.id);
+						if (!b.createdAt) return -1;
+
+						const timestampOrder =
+							a.createdAt.seconds - b.createdAt.seconds ||
+							a.createdAt.nanoseconds - b.createdAt.nanoseconds;
+						return timestampOrder || a.id.localeCompare(b.id);
+					});
 				loading = false;
 			},
 			(error) => {
@@ -47,9 +68,101 @@
 		);
 		return () => {
 			stopItems();
+			if (dragCandidate?.timer) clearTimeout(dragCandidate.timer);
 			if (undoTimeout) clearTimeout(undoTimeout);
 		};
 	});
+
+	function moveItem(itemId: string, targetId: string) {
+		const from = items.findIndex((item) => item.id === itemId);
+		const to = items.findIndex((item) => item.id === targetId);
+		if (from < 0 || to < 0 || from === to) return;
+		const next = [...items];
+		const [item] = next.splice(from, 1);
+		next.splice(to, 0, item);
+		items = next;
+	}
+
+	async function saveItemOrder() {
+		try {
+			for (let start = 0; start < items.length; start += 450) {
+				const batch = writeBatch(db);
+				for (const [offset, item] of items.slice(start, start + 450).entries()) {
+					batch.update(doc(itemsRef, item.id), { sortOrder: start + offset });
+				}
+				await batch.commit();
+			}
+		} catch (error) {
+			console.error('Unable to save grocery item order', error);
+			errorMessage = 'Could not save the new list order. Please try again.';
+		}
+	}
+
+	function startDrag(candidate: NonNullable<typeof dragCandidate>) {
+		if (candidate.timer) clearTimeout(candidate.timer);
+		candidate.started = true;
+		draggedItemId = candidate.itemId;
+	}
+
+	function handleReorderPointerDown(itemId: string, event: PointerEvent) {
+		if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+		if (dragCandidate?.timer) clearTimeout(dragCandidate.timer);
+		const candidate: NonNullable<typeof dragCandidate> = {
+			itemId,
+			pointerId: event.pointerId,
+			startX: event.clientX,
+			startY: event.clientY,
+			started: false,
+			changed: false
+		};
+		dragCandidate = candidate;
+		if (event.pointerType !== 'mouse') {
+			candidate.timer = setTimeout(() => {
+				if (dragCandidate === candidate) startDrag(candidate);
+			}, 350);
+		}
+	}
+
+	function handleReorderPointerMove(event: PointerEvent) {
+		const candidate = dragCandidate;
+		if (!candidate || candidate.pointerId !== event.pointerId) return;
+		if (!candidate.started) {
+			if (event.pointerType !== 'mouse') return;
+			if (Math.hypot(event.clientX - candidate.startX, event.clientY - candidate.startY) < 4) return;
+			startDrag(candidate);
+		}
+		event.preventDefault();
+		const target = document
+			.elementFromPoint(event.clientX, event.clientY)
+			?.closest<HTMLElement>('[data-item-id]')?.dataset.itemId;
+		if (target) {
+			const previousIndex = items.findIndex((item) => item.id === candidate.itemId);
+			const targetIndex = items.findIndex((item) => item.id === target);
+			if (previousIndex !== targetIndex) candidate.changed = true;
+			moveItem(candidate.itemId, target);
+		}
+	}
+
+	function finishReorderPointer(event: PointerEvent) {
+		const candidate = dragCandidate;
+		if (!candidate || candidate.pointerId !== event.pointerId) return;
+		if (candidate.timer) clearTimeout(candidate.timer);
+		dragCandidate = null;
+		if (candidate.started) {
+			draggedItemId = null;
+			if (candidate.changed) void saveItemOrder();
+		}
+	}
+
+	function handleReorderKeydown(itemId: string, event: KeyboardEvent) {
+		if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+		event.preventDefault();
+		const index = items.findIndex((item) => item.id === itemId);
+		const target = items[index + (event.key === 'ArrowUp' ? -1 : 1)];
+		if (!target) return;
+		moveItem(itemId, target.id);
+		void saveItemOrder();
+	}
 
 	async function addItem(event: SubmitEvent) {
 		event.preventDefault();
@@ -59,7 +172,18 @@
 		saving = true;
 		errorMessage = '';
 		try {
-			await addDoc(itemsRef, { name, count: 1, inCart: false, createdAt: serverTimestamp() });
+			const batch = writeBatch(db);
+			const newItem = doc(itemsRef);
+			const sortOrder =
+				items.reduce((highest, item) => Math.max(highest, item.sortOrder ?? -1), -1) + 1;
+			batch.set(newItem, {
+				name,
+				count: 1,
+				inCart: false,
+				createdAt: serverTimestamp(),
+				sortOrder
+			});
+			await batch.commit();
 			newItemName = '';
 		} catch (error) {
 			console.error('Unable to add grocery item', error);
@@ -150,6 +274,12 @@
 	}
 </script>
 
+<svelte:window
+	onpointermove={handleReorderPointerMove}
+	onpointerup={finishReorderPointer}
+	onpointercancel={finishReorderPointer}
+/>
+
 <svelte:head>
 	<title>Grocery list · Food Trax</title>
 	<meta name="description" content="A simple shared grocery list." />
@@ -200,7 +330,11 @@
 	{:else}
 		<ul class="item-list">
 			{#each items as item (item.id)}
-				<li class:checked={item.inCart}>
+				<li
+					class:checked={item.inCart}
+					class:dragging={draggedItemId === item.id}
+					data-item-id={item.id}
+				>
 					<div class="quantity-control" aria-label={`Quantity for ${item.name}`}>
 						<button
 							type="button"
@@ -217,11 +351,27 @@
 						>
 					</div>
 					<span class="item-name">{item.name}</span>
-					<label class="cart-toggle">
-						<input type="checkbox" checked={item.inCart} onchange={() => toggleInCart(item)} />
-						<span class="custom-check" aria-hidden="true"></span>
-						<span class="sr-only">{item.inCart ? 'In cart' : 'Not in cart'}: {item.name}</span>
-					</label>
+					<div class="cart-and-reorder">
+						<button
+							class="reorder-handle"
+							type="button"
+							aria-label={`Reorder ${item.name}. Use the up and down arrow keys to move it.`}
+							aria-keyshortcuts="ArrowUp ArrowDown"
+							onpointerdown={(event) => handleReorderPointerDown(item.id, event)}
+							onkeydown={(event) => handleReorderKeydown(item.id, event)}
+						>
+							<svg viewBox="0 0 16 20" aria-hidden="true">
+								<circle cx="5" cy="5" r="1.3" /><circle cx="11" cy="5" r="1.3" />
+								<circle cx="5" cy="10" r="1.3" /><circle cx="11" cy="10" r="1.3" />
+								<circle cx="5" cy="15" r="1.3" /><circle cx="11" cy="15" r="1.3" />
+							</svg>
+						</button>
+						<label class="cart-toggle">
+							<input type="checkbox" checked={item.inCart} onchange={() => toggleInCart(item)} />
+							<span class="custom-check" aria-hidden="true"></span>
+							<span class="sr-only">{item.inCart ? 'In cart' : 'Not in cart'}: {item.name}</span>
+						</label>
+					</div>
 					<button
 						class="delete-button"
 						type="button"
@@ -347,7 +497,7 @@
 	.table-head,
 	.item-list li {
 		display: grid;
-		grid-template-columns: 118px 1fr 82px 36px;
+		grid-template-columns: 118px 1fr 78px 36px;
 		align-items: center;
 	}
 	.table-head {
@@ -373,6 +523,12 @@
 	}
 	.item-list li:hover {
 		background: #fbfcfb;
+	}
+	.item-list li.dragging {
+		position: relative;
+		z-index: 1;
+		background: #edf5ef;
+		box-shadow: 0 3px 12px #243d2c22;
 	}
 	.quantity-control {
 		width: max-content;
@@ -419,6 +575,41 @@
 	.checked .item-name {
 		color: #9aa69e;
 		text-decoration: line-through;
+	}
+	.cart-and-reorder {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+	}
+	.reorder-handle {
+		width: 34px;
+		height: 40px;
+		display: grid;
+		place-items: center;
+		padding: 0;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: #829187;
+		cursor: grab;
+		touch-action: none;
+		user-select: none;
+		-webkit-user-select: none;
+	}
+	.reorder-handle:active {
+		cursor: grabbing;
+	}
+	.reorder-handle:hover,
+	.reorder-handle:focus-visible {
+		background: #edf5ef;
+		color: #3d7351;
+		outline: none;
+	}
+	.reorder-handle svg {
+		width: 16px;
+		height: 20px;
+		fill: currentColor;
 	}
 	.cart-toggle {
 		position: relative;
@@ -603,7 +794,7 @@
 		}
 		.table-head,
 		.item-list li {
-			grid-template-columns: 82px 1fr 58px 30px;
+			grid-template-columns: 82px 1fr 72px 30px;
 		}
 		.table-head {
 			padding: 0 7px 6px;
@@ -625,6 +816,13 @@
 		}
 		.item-name {
 			font-size: 13px;
+		}
+		.cart-and-reorder {
+			gap: 4px;
+		}
+		.reorder-handle {
+			width: 34px;
+			height: 36px;
 		}
 		.cart-toggle {
 			width: 20px;

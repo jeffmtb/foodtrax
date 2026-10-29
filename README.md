@@ -89,6 +89,7 @@ Grocery items live in `groceryItems/{item-id}`:
 | `count`     | integer   | Quantity from 1 to 9            |
 | `inCart`    | boolean   | Whether the item is in the cart |
 | `createdAt` | timestamp | Creation time                   |
+| `sortOrder` | integer   | Optional manual list position   |
 
 Membership records live in `groceryListMembers/{uid}` and contain `displayName` and `role`. The rules allow a signed-in user to read only their own membership record. Grocery-list reads and writes are allowed only when that record exists. Item creation and updates are also checked for valid fields and values in `firestore.rules`.
 

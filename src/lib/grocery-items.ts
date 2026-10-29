@@ -13,6 +13,7 @@ export type GroceryItem = {
 	count: number;
 	inCart: boolean;
 	createdAt?: Timestamp;
+	sortOrder?: number;
 };
 
 export function nextGroceryItemCount(count: number, change: -1 | 1): number | null {
@@ -29,6 +30,7 @@ export async function restoreGroceryItem(itemsRef: CollectionReference, item: Gr
 		name: item.name,
 		count: item.count,
 		inCart: item.inCart,
-		createdAt: item.createdAt ?? serverTimestamp()
+		createdAt: item.createdAt ?? serverTimestamp(),
+		...(item.sortOrder !== undefined ? { sortOrder: item.sortOrder } : {})
 	});
 }

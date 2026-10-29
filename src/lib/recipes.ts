@@ -127,15 +127,39 @@ export async function addRecipeIngredients(db: Firestore, ingredients: string[])
 	}
 	const groceries = collection(db, 'groceryItems');
 	const snapshot = await getDocs(groceries);
+	const existingItems = snapshot.docs.slice().sort((a, b) => {
+		const aOrder = a.data().sortOrder;
+		const bOrder = b.data().sortOrder;
+		if (typeof aOrder === 'number' && typeof bOrder === 'number' && aOrder !== bOrder) {
+			return aOrder - bOrder;
+		}
+		const aCreatedAt = a.data().createdAt as Timestamp | undefined;
+		const bCreatedAt = b.data().createdAt as Timestamp | undefined;
+		if (!aCreatedAt) return bCreatedAt ? 1 : a.id.localeCompare(b.id);
+		if (!bCreatedAt) return -1;
+		return (
+			aCreatedAt.seconds - bCreatedAt.seconds ||
+			aCreatedAt.nanoseconds - bCreatedAt.nanoseconds ||
+			a.id.localeCompare(b.id)
+		);
+	});
 	const names = newGroceryIngredients(
 		ingredients,
-		snapshot.docs.map((item) => item.data().name as string)
+		existingItems.map((item) => item.data().name as string)
 	);
 	if (names.length) {
 		const batch = writeBatch(db);
-		for (const name of names) {
-			batch.set(doc(groceries), { name, count: 1, inCart: false, createdAt: serverTimestamp() });
-		}
+		const firstSortOrder =
+			existingItems.reduce((highest, item) => Math.max(highest, item.data().sortOrder ?? -1), -1) + 1;
+		names.forEach((name, index) => {
+			batch.set(doc(groceries), {
+				name,
+				count: 1,
+				inCart: false,
+				createdAt: serverTimestamp(),
+				sortOrder: firstSortOrder + index
+			});
+		});
 		await batch.commit();
 	}
 	return { added: names.length, skipped: ingredients.length - names.length };

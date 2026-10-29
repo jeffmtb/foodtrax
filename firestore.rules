@@ -3,7 +3,7 @@ rules_version = '2';
 // Shared household data model:
 // groceryListMembers/{uid}: console-managed membership, self-readable only.
 // groceryItems/{id}: name (1–80 chars), count (int 1–9), inCart (bool),
-//   optional createdAt (existing grocery schema).
+//   optional createdAt and sortOrder (manual list position).
 // recipes/{id}: title (1–100 chars), ingredientsText (1–100 newline-separated
 //   ingredients of 1–80 chars each), instructions (0–10000 chars),
 //   version (positive int, increments on update), createdAt (immutable timestamp),
@@ -16,14 +16,16 @@ service cloud.firestore {
     }
 
     function validGroceryItem() {
-      return request.resource.data.keys().hasOnly(['name', 'count', 'inCart', 'createdAt'])
+      return request.resource.data.keys().hasOnly(['name', 'count', 'inCart', 'createdAt', 'sortOrder'])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 80
         && request.resource.data.count is int
         && request.resource.data.count >= 1
         && request.resource.data.count <= 9
-        && request.resource.data.inCart is bool;
+        && request.resource.data.inCart is bool
+        && (!('sortOrder' in request.resource.data)
+          || (request.resource.data.sortOrder is int && request.resource.data.sortOrder >= 0));
     }
 
     function validRecipe() {
