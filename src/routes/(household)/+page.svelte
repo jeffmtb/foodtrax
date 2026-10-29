@@ -91,10 +91,10 @@
 		if (movedItemTimeout) clearTimeout(movedItemTimeout);
 		recentlyMovedItemId = itemId;
 		movedItemTimeout = setTimeout(() => {
-			if (handle && document.activeElement === handle) handle.blur();
+			if (handle) handle.blur();
 			recentlyMovedItemId = null;
 			movedItemTimeout = undefined;
-		}, 700);
+		}, 450);
 	}
 
 	async function saveItemOrder() {
@@ -135,7 +135,7 @@
 			candidate.handle.setPointerCapture(event.pointerId);
 			candidate.timer = setTimeout(() => {
 				if (dragCandidate === candidate) startDrag(candidate);
-			}, 350);
+			}, 250);
 		}
 	}
 
@@ -379,6 +379,8 @@
 					<div class="cart-and-reorder">
 						<button
 							class="reorder-handle"
+							class:active-drag={draggedItemId === item.id}
+							class:recently-moved={recentlyMovedItemId === item.id}
 							type="button"
 							aria-label={`Reorder ${item.name}. Use the up and down arrow keys to move it.`}
 							aria-keyshortcuts="ArrowUp ArrowDown"
@@ -625,6 +627,9 @@
 		border-radius: 6px;
 		background: transparent;
 		color: #829187;
+		transition:
+			background 0.15s,
+			color 0.15s;
 		cursor: grab;
 		touch-action: none;
 		user-select: none;
@@ -634,11 +639,21 @@
 	.reorder-handle:active {
 		cursor: grabbing;
 	}
-	.reorder-handle:hover,
 	.reorder-handle:focus-visible {
 		background: #edf5ef;
 		color: #3d7351;
 		outline: none;
+	}
+	.reorder-handle.active-drag,
+	.reorder-handle.recently-moved {
+		background: #edf5ef;
+		color: #3d7351;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.reorder-handle:hover {
+			background: #edf5ef;
+			color: #3d7351;
+		}
 	}
 	.reorder-handle svg {
 		width: 16px;
