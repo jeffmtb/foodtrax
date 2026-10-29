@@ -28,8 +28,10 @@
 	let recentlyDeleted = $state<GroceryItem | null>(null);
 	let undoingDelete = $state(false);
 	let draggedItemId = $state<string | null>(null);
+	let recentlyMovedItemId = $state<string | null>(null);
 	let dragCandidate: {
 		itemId: string;
+		handle: HTMLElement;
 		pointerId: number;
 		startX: number;
 		startY: number;
@@ -38,6 +40,7 @@
 		timer?: ReturnType<typeof setTimeout>;
 	} | null = null;
 	let undoTimeout: ReturnType<typeof setTimeout> | undefined;
+	let movedItemTimeout: ReturnType<typeof setTimeout> | undefined;
 
 	onMount(() => {
 		const stopItems = onSnapshot(
@@ -70,6 +73,7 @@
 			stopItems();
 			if (dragCandidate?.timer) clearTimeout(dragCandidate.timer);
 			if (undoTimeout) clearTimeout(undoTimeout);
+			if (movedItemTimeout) clearTimeout(movedItemTimeout);
 		};
 	});
 
@@ -81,6 +85,16 @@
 		const [item] = next.splice(from, 1);
 		next.splice(to, 0, item);
 		items = next;
+	}
+
+	function showMovedItem(itemId: string, handle?: HTMLElement) {
+		if (movedItemTimeout) clearTimeout(movedItemTimeout);
+		recentlyMovedItemId = itemId;
+		movedItemTimeout = setTimeout(() => {
+			if (handle && document.activeElement === handle) handle.blur();
+			recentlyMovedItemId = null;
+			movedItemTimeout = undefined;
+		}, 700);
 	}
 
 	async function saveItemOrder() {
@@ -109,6 +123,7 @@
 		if (dragCandidate?.timer) clearTimeout(dragCandidate.timer);
 		const candidate: NonNullable<typeof dragCandidate> = {
 			itemId,
+			handle: event.currentTarget as HTMLElement,
 			pointerId: event.pointerId,
 			startX: event.clientX,
 			startY: event.clientY,
@@ -117,6 +132,7 @@
 		};
 		dragCandidate = candidate;
 		if (event.pointerType !== 'mouse') {
+			candidate.handle.setPointerCapture(event.pointerId);
 			candidate.timer = setTimeout(() => {
 				if (dragCandidate === candidate) startDrag(candidate);
 			}, 350);
@@ -150,7 +166,10 @@
 		dragCandidate = null;
 		if (candidate.started) {
 			draggedItemId = null;
-			if (candidate.changed) void saveItemOrder();
+			if (candidate.changed) {
+				showMovedItem(candidate.itemId, candidate.handle);
+				void saveItemOrder();
+			}
 		}
 	}
 
@@ -161,6 +180,7 @@
 		const target = items[index + (event.key === 'ArrowUp' ? -1 : 1)];
 		if (!target) return;
 		moveItem(itemId, target.id);
+		showMovedItem(itemId);
 		void saveItemOrder();
 	}
 
@@ -333,6 +353,7 @@
 				<li
 					class:checked={item.inCart}
 					class:dragging={draggedItemId === item.id}
+					class:recently-moved={recentlyMovedItemId === item.id}
 					data-item-id={item.id}
 				>
 					<div class="quantity-control" aria-label={`Quantity for ${item.name}`}>
@@ -350,7 +371,11 @@
 							onclick={() => changeCount(item, 1)}>+</button
 						>
 					</div>
-					<span class="item-name">{item.name}</span>
+					<span
+						class="item-name"
+						onpointerdown={(event) => handleReorderPointerDown(item.id, event)}
+						oncontextmenu={(event) => event.preventDefault()}
+					>{item.name}</span>
 					<div class="cart-and-reorder">
 						<button
 							class="reorder-handle"
@@ -358,6 +383,7 @@
 							aria-label={`Reorder ${item.name}. Use the up and down arrow keys to move it.`}
 							aria-keyshortcuts="ArrowUp ArrowDown"
 							onpointerdown={(event) => handleReorderPointerDown(item.id, event)}
+							oncontextmenu={(event) => event.preventDefault()}
 							onkeydown={(event) => handleReorderKeydown(item.id, event)}
 						>
 							<svg viewBox="0 0 16 20" aria-hidden="true">
@@ -530,6 +556,9 @@
 		background: #edf5ef;
 		box-shadow: 0 3px 12px #243d2c22;
 	}
+	.item-list li.recently-moved {
+		background: #edf5ef;
+	}
 	.quantity-control {
 		width: max-content;
 		height: 31px;
@@ -571,6 +600,10 @@
 		font-size: 13px;
 		font-weight: 560;
 		transition: color 0.15s;
+		touch-action: none;
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
 	}
 	.checked .item-name {
 		color: #9aa69e;
@@ -596,6 +629,7 @@
 		touch-action: none;
 		user-select: none;
 		-webkit-user-select: none;
+		-webkit-touch-callout: none;
 	}
 	.reorder-handle:active {
 		cursor: grabbing;
