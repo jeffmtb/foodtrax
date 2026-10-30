@@ -193,15 +193,16 @@
 		errorMessage = '';
 		try {
 			const batch = writeBatch(db);
+			items.forEach((item, index) => {
+				batch.update(doc(itemsRef, item.id), { sortOrder: index + 1 });
+			});
 			const newItem = doc(itemsRef);
-			const sortOrder =
-				items.reduce((highest, item) => Math.max(highest, item.sortOrder ?? -1), -1) + 1;
 			batch.set(newItem, {
 				name,
 				count: 1,
 				inCart: false,
 				createdAt: serverTimestamp(),
-				sortOrder
+				sortOrder: 0
 			});
 			await batch.commit();
 			newItemName = '';
