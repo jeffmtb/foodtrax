@@ -26,6 +26,28 @@
 	let selected = $state<number[]>([]);
 	const ingredients = $derived(ingredientLines(recipe?.ingredientsText ?? ''));
 
+	function instructionParts(text: string) {
+		const parts: { text: string; href?: string }[] = [];
+		const urlPattern = /https?:\/\/[^\s<>"']+/gi;
+		let position = 0;
+
+		for (const match of text.matchAll(urlPattern)) {
+			const rawUrl = match[0];
+			const url = rawUrl.replace(/[.,!?;:)\]}]+$/, '');
+			const start = match.index ?? 0;
+			if (start > position) parts.push({ text: text.slice(position, start) });
+			if (url) {
+				parts.push({ text: url, href: url });
+				position = start + url.length;
+			} else {
+				parts.push({ text: rawUrl });
+				position = start + rawUrl.length;
+			}
+		}
+		if (position < text.length) parts.push({ text: text.slice(position) });
+		return parts;
+	}
+
 	onMount(() =>
 		onSnapshot(
 			doc(db, 'recipes', id),
@@ -193,7 +215,15 @@
 		{#if recipe.instructions}
 			<section class="recipe-instructions">
 				<h2>Instructions and notes</h2>
-				<p>{recipe.instructions}</p>
+				<p>
+					{#each instructionParts(recipe.instructions) as part}
+						{#if part.href}
+							<a href={part.href} target="_blank" rel="noopener noreferrer">{part.text}</a>
+						{:else}
+							{part.text}
+						{/if}
+					{/each}
+				</p>
 			</section>
 		{/if}
 	{/if}

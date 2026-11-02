@@ -335,6 +335,11 @@ textarea {
 	line-height: 1.8;
 	color: var(--text-body);
 }
+.recipe-instructions a {
+	color: var(--accent);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
 @media (max-width: 600px) {
 	.recipe-page {
 		padding: 20px 0 24px;

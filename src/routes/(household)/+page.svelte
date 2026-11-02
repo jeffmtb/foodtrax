@@ -372,11 +372,15 @@
 							onclick={() => changeCount(item, 1)}>+</button
 						>
 					</div>
-					<span
+					<button
 						class="item-name"
+						type="button"
+						aria-label={`Reorder ${item.name}. Use the up and down arrow keys to move it.`}
+						aria-keyshortcuts="ArrowUp ArrowDown"
 						onpointerdown={(event) => handleReorderPointerDown(item.id, event)}
 						oncontextmenu={(event) => event.preventDefault()}
-					>{item.name}</span>
+						onkeydown={(event) => handleReorderKeydown(item.id, event)}
+					>{item.name}</button>
 					<div class="cart-and-reorder">
 						<button
 							class="reorder-handle"
@@ -599,14 +603,25 @@
 		font-weight: 650;
 	}
 	.item-name {
+		display: block;
+		width: 100%;
+		padding: 0;
+		border: 0;
+		background: transparent;
 		color: #37473e;
 		font-size: 13px;
 		font-weight: 560;
+		font-family: inherit;
+		text-align: left;
+		cursor: grab;
 		transition: color 0.15s;
 		touch-action: none;
 		user-select: none;
 		-webkit-user-select: none;
 		-webkit-touch-callout: none;
+	}
+	.item-name:active {
+		cursor: grabbing;
 	}
 	.checked .item-name {
 		color: #9aa69e;
