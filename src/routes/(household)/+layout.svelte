@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
@@ -85,7 +86,10 @@
 	}
 </script>
 
-<main class="page-shell">
+<main
+	class="page-shell"
+	class:grocery-shell={authState === 'member' && page.route.id === '/(household)'}
+>
 	<div class="list-card">
 		<header class="topbar">
 			<a class="brand" href={resolve('/(household)')} aria-label="Food Trax home">
@@ -141,7 +145,6 @@
 		box-sizing: border-box;
 	}
 	:global(body) {
-		min-width: 320px;
 		background: var(--app-bg);
 		color: var(--text);
 		font-family:
@@ -175,6 +178,15 @@
 			0 24px 70px #34493c12,
 			0 3px 10px #34493c08;
 		padding: 0 42px;
+	}
+	.grocery-shell {
+		height: 100vh;
+		height: 100dvh;
+	}
+	.grocery-shell .list-card {
+		display: flex;
+		flex-direction: column;
+		max-height: 100%;
 	}
 	.topbar {
 		min-height: 58px;
@@ -338,6 +350,16 @@
 		.account-name {
 			max-width: 105px;
 			font-size: 10px;
+		}
+	}
+	@media (max-height: 480px) {
+		.grocery-shell {
+			/* Keep room for the rows when the controls outgrow a short window. */
+			min-height: 21rem;
+			padding-block: 8px max(8px, env(safe-area-inset-bottom));
+		}
+		.grocery-shell .topbar {
+			min-height: 48px;
 		}
 	}
 	.error-message {

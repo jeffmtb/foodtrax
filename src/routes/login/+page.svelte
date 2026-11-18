@@ -155,7 +155,6 @@
 		box-sizing: border-box;
 	}
 	:global(body) {
-		min-width: 320px;
 		background: var(--app-bg);
 		color: var(--text);
 		font-family:

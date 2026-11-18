@@ -32,7 +32,8 @@
 	let dragCandidate: {
 		itemId: string;
 		handle: HTMLElement;
-		pointerId: number;
+		pointerId?: number;
+		touchId?: number;
 		startX: number;
 		startY: number;
 		started: boolean;
@@ -43,6 +44,10 @@
 	let movedItemTimeout: ReturnType<typeof setTimeout> | undefined;
 
 	onMount(() => {
+		// Touch moves must remain cancelable once a long press starts dragging.
+		// Until then, leave them alone so the browser can scroll normally.
+		window.addEventListener('touchmove', handleReorderTouchMove, { passive: false });
+		window.addEventListener('scroll', cancelPendingReorder, true);
 		const stopItems = onSnapshot(
 			itemsRef,
 			(snapshot) => {
@@ -71,6 +76,8 @@
 		);
 		return () => {
 			stopItems();
+			window.removeEventListener('touchmove', handleReorderTouchMove);
+			window.removeEventListener('scroll', cancelPendingReorder, true);
 			if (dragCandidate?.timer) clearTimeout(dragCandidate.timer);
 			if (undoTimeout) clearTimeout(undoTimeout);
 			if (movedItemTimeout) clearTimeout(movedItemTimeout);
@@ -80,11 +87,12 @@
 	function moveItem(itemId: string, targetId: string) {
 		const from = items.findIndex((item) => item.id === itemId);
 		const to = items.findIndex((item) => item.id === targetId);
-		if (from < 0 || to < 0 || from === to) return;
+		if (from < 0 || to < 0 || from === to) return false;
 		const next = [...items];
 		const [item] = next.splice(from, 1);
 		next.splice(to, 0, item);
 		items = next;
+		return true;
 	}
 
 	function showMovedItem(itemId: string, handle?: HTMLElement) {
@@ -118,9 +126,22 @@
 		draggedItemId = candidate.itemId;
 	}
 
-	function handleReorderPointerDown(itemId: string, event: PointerEvent) {
-		if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
-		if (dragCandidate?.timer) clearTimeout(dragCandidate.timer);
+	function beginReorder(candidate: NonNullable<typeof dragCandidate>, fromHandle: boolean) {
+		if (dragCandidate) return;
+		dragCandidate = candidate;
+		if (fromHandle) {
+			startDrag(candidate);
+		} else {
+			candidate.timer = setTimeout(() => {
+				if (dragCandidate === candidate) startDrag(candidate);
+			}, 500);
+		}
+	}
+
+	function handleReorderPointerDown(itemId: string, event: PointerEvent, fromHandle = false) {
+		// Touch uses touch events so a long press can stop scrolling before the
+		// browser takes over the gesture and cancels its pointer events.
+		if (event.pointerType === 'touch' || !event.isPrimary || event.button !== 0) return;
 		const candidate: NonNullable<typeof dragCandidate> = {
 			itemId,
 			handle: event.currentTarget as HTMLElement,
@@ -130,38 +151,72 @@
 			started: false,
 			changed: false
 		};
-		dragCandidate = candidate;
-		if (event.pointerType !== 'mouse') {
-			candidate.handle.setPointerCapture(event.pointerId);
-			candidate.timer = setTimeout(() => {
-				if (dragCandidate === candidate) startDrag(candidate);
-			}, 250);
+		beginReorder(candidate, fromHandle);
+	}
+
+	function handleReorderTouchStart(itemId: string, event: TouchEvent, fromHandle = false) {
+		if (event.touches.length !== 1) {
+			finishReorder();
+			return;
+		}
+		const touch = event.changedTouches[0];
+		beginReorder(
+			{
+				itemId,
+				handle: event.currentTarget as HTMLElement,
+				touchId: touch.identifier,
+				startX: touch.clientX,
+				startY: touch.clientY,
+				started: false,
+				changed: false
+			},
+			fromHandle
+		);
+	}
+
+	function handleReorderMove(clientX: number, clientY: number, event: Event) {
+		const candidate = dragCandidate;
+		if (!candidate) return;
+		if (!candidate.started) {
+			// Moving before the hold completes means scrolling, not reordering.
+			if (Math.hypot(clientX - candidate.startX, clientY - candidate.startY) > 8) {
+				finishReorder();
+			}
+			return;
+		}
+		event.preventDefault();
+		const target = document
+			.elementFromPoint(clientX, clientY)
+			?.closest<HTMLElement>('[data-item-id]')?.dataset.itemId;
+		if (target && moveItem(candidate.itemId, target)) {
+			candidate.changed = true;
 		}
 	}
 
 	function handleReorderPointerMove(event: PointerEvent) {
-		const candidate = dragCandidate;
-		if (!candidate || candidate.pointerId !== event.pointerId) return;
-		if (!candidate.started) {
-			if (event.pointerType !== 'mouse') return;
-			if (Math.hypot(event.clientX - candidate.startX, event.clientY - candidate.startY) < 4) return;
-			startDrag(candidate);
-		}
-		event.preventDefault();
-		const target = document
-			.elementFromPoint(event.clientX, event.clientY)
-			?.closest<HTMLElement>('[data-item-id]')?.dataset.itemId;
-		if (target) {
-			const previousIndex = items.findIndex((item) => item.id === candidate.itemId);
-			const targetIndex = items.findIndex((item) => item.id === target);
-			if (previousIndex !== targetIndex) candidate.changed = true;
-			moveItem(candidate.itemId, target);
-		}
+		if (dragCandidate?.pointerId !== event.pointerId) return;
+		handleReorderMove(event.clientX, event.clientY, event);
 	}
 
-	function finishReorderPointer(event: PointerEvent) {
+	function handleReorderTouchMove(event: TouchEvent) {
+		if (dragCandidate?.touchId === undefined) return;
+		if (event.touches.length !== 1 || !event.cancelable) {
+			finishReorder();
+			return;
+		}
+		const touch = Array.from(event.changedTouches).find(
+			(touch) => touch.identifier === dragCandidate?.touchId
+		);
+		if (touch) handleReorderMove(touch.clientX, touch.clientY, event);
+	}
+
+	function cancelPendingReorder() {
+		if (dragCandidate && !dragCandidate.started) finishReorder();
+	}
+
+	function finishReorder() {
 		const candidate = dragCandidate;
-		if (!candidate || candidate.pointerId !== event.pointerId) return;
+		if (!candidate) return;
 		if (candidate.timer) clearTimeout(candidate.timer);
 		dragCandidate = null;
 		if (candidate.started) {
@@ -173,13 +228,24 @@
 		}
 	}
 
+	function finishReorderPointer(event: PointerEvent) {
+		if (dragCandidate?.pointerId === event.pointerId) finishReorder();
+	}
+
+	function finishReorderTouch(event: TouchEvent) {
+		if (
+			Array.from(event.changedTouches).some((touch) => touch.identifier === dragCandidate?.touchId)
+		) {
+			finishReorder();
+		}
+	}
+
 	function handleReorderKeydown(itemId: string, event: KeyboardEvent) {
 		if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
 		event.preventDefault();
 		const index = items.findIndex((item) => item.id === itemId);
 		const target = items[index + (event.key === 'ArrowUp' ? -1 : 1)];
-		if (!target) return;
-		moveItem(itemId, target.id);
+		if (!target || !moveItem(itemId, target.id)) return;
 		showMovedItem(itemId);
 		void saveItemOrder();
 	}
@@ -299,6 +365,9 @@
 	onpointermove={handleReorderPointerMove}
 	onpointerup={finishReorderPointer}
 	onpointercancel={finishReorderPointer}
+	ontouchend={finishReorderTouch}
+	ontouchcancel={finishReorderTouch}
+	onblur={finishReorder}
 />
 
 <svelte:head>
@@ -375,12 +444,13 @@
 					<button
 						class="item-name"
 						type="button"
-						aria-label={`Reorder ${item.name}. Use the up and down arrow keys to move it.`}
+						aria-label={`Reorder ${item.name}. Hold to drag or use the up and down arrow keys to move it.`}
 						aria-keyshortcuts="ArrowUp ArrowDown"
 						onpointerdown={(event) => handleReorderPointerDown(item.id, event)}
+						ontouchstart={(event) => handleReorderTouchStart(item.id, event)}
 						oncontextmenu={(event) => event.preventDefault()}
-						onkeydown={(event) => handleReorderKeydown(item.id, event)}
-					>{item.name}</button>
+						onkeydown={(event) => handleReorderKeydown(item.id, event)}>{item.name}</button
+					>
 					<div class="cart-and-reorder">
 						<button
 							class="reorder-handle"
@@ -389,7 +459,8 @@
 							type="button"
 							aria-label={`Reorder ${item.name}. Use the up and down arrow keys to move it.`}
 							aria-keyshortcuts="ArrowUp ArrowDown"
-							onpointerdown={(event) => handleReorderPointerDown(item.id, event)}
+							onpointerdown={(event) => handleReorderPointerDown(item.id, event, true)}
+							ontouchstart={(event) => handleReorderTouchStart(item.id, event, true)}
 							oncontextmenu={(event) => event.preventDefault()}
 							onkeydown={(event) => handleReorderKeydown(item.id, event)}
 						>
@@ -442,6 +513,7 @@
 <style>
 	.add-form {
 		height: 52px;
+		flex-shrink: 0;
 		margin: 22px 0 24px;
 		display: flex;
 		align-items: center;
@@ -494,6 +566,9 @@
 		cursor: default;
 	}
 	.items-section {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
 		padding-bottom: 14px;
 	}
 	.section-heading {
@@ -547,6 +622,8 @@
 		margin: 0;
 		padding: 0;
 		list-style: none;
+		overflow-y: auto;
+		overscroll-behavior-y: contain;
 	}
 	.item-list li {
 		min-height: 62px;
@@ -613,9 +690,10 @@
 		font-weight: 560;
 		font-family: inherit;
 		text-align: left;
+		overflow-wrap: anywhere;
 		cursor: grab;
 		transition: color 0.15s;
-		touch-action: none;
+		touch-action: pan-y pinch-zoom;
 		user-select: none;
 		-webkit-user-select: none;
 		-webkit-touch-callout: none;
@@ -834,7 +912,7 @@
 		white-space: nowrap;
 		border: 0;
 	}
-	@media (max-width: 600px) {
+	@media (max-width: 600px), (max-height: 480px) {
 		.add-form {
 			height: 44px;
 			margin: 10px 0 16px;
@@ -893,12 +971,12 @@
 			width: 20px;
 			height: 20px;
 		}
+		.error-message {
+			margin: -8px 0 12px;
+		}
 		.card-footer,
 		.page-note {
 			display: none;
-		}
-		.error-message {
-			margin: -8px 0 12px;
 		}
 	}
 	@media (prefers-color-scheme: dark) {
